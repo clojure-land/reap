@@ -62,7 +62,8 @@
   (fn [matcher]
     (clojure.core/sequence xform (parser matcher))))
 
-(defn cons
+;; old version
+#_(defn cons
   [parser parsers]
   (fn [matcher]
     (let [cell (parser matcher)
@@ -70,6 +71,15 @@
       (if (= cell :ignore)
         rest
         (clojure.core/cons cell rest)))))
+
+(defn cons
+  [parser parsers]
+  (fn [matcher]
+    (when-let [fst (parser matcher)]
+      (let [rst (parsers matcher)]
+        (if (not= fst :ignore)
+          (clojure.core/cons fst rst)
+          rst)))))
 
 (defn list
   [& parsers]

@@ -27,13 +27,27 @@
 ;;  ] )
 
 ;; auth-param = token BWS "=" BWS ( token / quoted-string )
+;; Don't think we need this
+(defn auth-param-with-lookahead []
+  (p/as-map
+   (p/sequence-group
+    (p/as-entry
+     :name
+     (p/pattern-parser (re-pattern (re/re-compose "(%s)%s=%s(?=%s)" token BWS BWS token)) 1))
+    (p/as-entry
+     :value
+     (p/alternatives
+      (p/pattern-parser (re-pattern token))
+      (p/comp
+       rfc7230/unescape-quoted-string
+       (p/pattern-parser (re-pattern rfc7230/quoted-string) 1)))))))
+
 (defn auth-param []
   (p/as-map
    (p/sequence-group
     (p/as-entry
      :name
-     (p/pattern-parser (re-pattern token)))
-    (p/ignore (p/pattern-parser (re-pattern (re/re-compose "%s=%s" BWS BWS))))
+     (p/pattern-parser (re-pattern (re/re-compose "(%s)%s=%s" token BWS BWS)) 1))
     (p/as-entry
      :value
      (p/alternatives
@@ -43,13 +57,17 @@
        (p/pattern-parser (re-pattern rfc7230/quoted-string) 1)))))))
 
 (comment
-  (let [p (auth-param)]
-    (p (re/input "foo=\"bar=zip\""))
+  (let [p (auth-param)
+        m (re/input "foo = bar")]
+    (p m)
     ))
 
 (comment
-  (let [p (auth-param)]
-    (p (re/input "foo==bar"))
+  (let [p (p/sequence-group
+           (p/pattern-parser (re-pattern (re/re-compose "(%s)%s=%s" token BWS BWS)) 1)
+           (p/pattern-parser (re-pattern rfc7230/quoted-string)))]
+    (p (re/input "foo=\"bar\"")
+       #_(re/input "foo=bar"))
     ))
 
 
@@ -63,14 +81,92 @@
 (def token68-lookahead
   (re/re-compose "%s(?=%s(?:,|$))" token68 OWS))
 
-#_(do
+(comment
+  (let [p
+        (p/alternatives
+         (p/as-entry
+          :token68
+          (p/pattern-parser
+           (re-pattern token68-lookahead)))
+         (p/as-entry
+          :auth-params
+          (p/comp
+           vec
+           (p/optionally
+            (p/first
+             (p/sequence-group
+              (p/cons
+               (p/alternatives
+                (p/ignore
+                 (p/pattern-parser
+                  (re-pattern #",")))
+                (auth-param))
+               (p/zero-or-more
+                (p/first
+                 (p/sequence-group
+                  (p/ignore
+                   (p/pattern-parser
+                    (re-pattern
+                     (re/re-compose "%s%s" OWS ","))))
+                  (p/optionally
+                   (p/first
+                    (p/sequence-group
+                     (p/ignore (p/pattern-parser (re-pattern OWS)))
+                     (auth-param))))))))))))))]
+    (p (re/input "a"))
+    #_(p (re/input "A a=b,c=d,B e=f,C abcdef==,D g=h,j=k"))
+    ))
 
 
-  (re-find (re-pattern token68) "abc=bef  "))
 
 ;; credentials = auth-scheme [ 1*SP ( token68 / [ ( "," / auth-param )
 ;;  *( OWS "," [ OWS auth-param ] ) ] ) ]
 
+(defn credentials []
+    (p/sequence-group
+     (p/as-entry
+      :auth-scheme
+      (p/pattern-parser
+       (re-pattern token)))
+     (p/optionally
+      (p/first
+       (p/sequence-group
+        (p/as-entry
+         :space
+         (p/pattern-parser
+          (re-pattern
+           (re/re-compose "%s" SP))))
+        (p/alternatives
+         (p/as-entry
+          :token68
+          (p/pattern-parser
+           (re-pattern token68-lookahead)))
+         (p/as-entry
+          :auth-params
+          (p/comp
+           vec
+           (p/optionally
+            (p/first
+             (p/sequence-group
+              (p/cons
+               (p/alternatives
+                (p/pattern-parser
+                 (re-pattern #","))
+                (auth-param))
+               (p/zero-or-more
+                (p/first
+                 (p/sequence-group
+                  (p/pattern-parser
+                   (re-pattern
+                    (re/re-compose "%s%s" OWS ",")))
+                  (p/optionally
+                   (p/first
+                    (p/sequence-group
+                     (p/pattern-parser (re-pattern OWS))
+                     (auth-param)))))))))))))))))))
+
+;; credentials = auth-scheme [ 1*SP ( token68 / [ ( "," / auth-param )
+;;  *( OWS "," [ OWS auth-param ] ) ] ) ]
 (defn credentials []
   (p/as-map
    (p/sequence-group
@@ -84,7 +180,7 @@
        (p/ignore
         (p/pattern-parser
          (re-pattern
-          (re/re-compose "%s+" SP))))
+          (re/re-compose "%s" SP))))
        (p/alternatives
         (p/as-entry
          :token68
@@ -118,8 +214,50 @@
 
 ;; challenge = auth-scheme [ 1*SP ( token68 / [ ( "," / auth-param ) *(
 ;;  OWS "," [ OWS auth-param ] ) ] ) ]
-
-(def challenge credentials)
+(defn challenge []
+  (p/as-map
+   (p/sequence-group
+    (p/as-entry
+     :auth-scheme
+     (p/pattern-parser
+      (re-pattern token)))
+    (p/optionally
+     (p/first
+      (p/sequence-group
+       (p/ignore
+        (p/pattern-parser
+         (re-pattern
+          (re/re-compose "%s" SP))))
+       (p/alternatives
+        (p/as-entry
+         :token68
+         (p/pattern-parser
+          (re-pattern token68-lookahead)))
+        (p/as-entry
+         :auth-params
+         (p/comp
+          vec
+          (p/optionally
+           (p/first
+            (p/sequence-group
+             (p/cons
+              (p/alternatives
+               (p/ignore
+                (p/pattern-parser
+                 (re-pattern #",")))
+               (auth-param))
+              (p/zero-or-more
+               (p/first
+                (p/sequence-group
+                 (p/ignore
+                  (p/pattern-parser
+                   (re-pattern
+                    (re/re-compose "%s%s(?!%s%s%s%s)" OWS "," OWS token SP token))))
+                 (p/optionally
+                  (p/first
+                   (p/sequence-group
+                    (p/ignore (p/pattern-parser (re-pattern OWS)))
+                    (auth-param))))))))))))))))))))
 
 (defn www-authenticate []
   (p/first
@@ -146,23 +284,15 @@
              (re-pattern OWS)))
            (challenge)))))))))))
 
+(comment
+  (let [p (www-authenticate)
+        m (re/input "Newauth realm=\"apps\", type=1,   title=\"Login to \\\"apps\\\"\", Basic realm=\"simple\"")]
+    (p m)))
 
-;; This misses out on Basic realm="simple" (TODO: fix this!)
+
 (comment
   (let [p (www-authenticate)]
-    (p (re/input "Newauth realm=\"apps\", type=1,   title=\"Login to \\\"apps\\\"\", Basic realm=\"simple\""))))
-
-
-(comment
-  (let [p (www-authenticate)]
-    (p (re/input "Bearer foo=bar,zip=qux,Basic aseifjasefa=,Bearer foo=bar")
-       )
-    ))
-
-(comment
-  (let [p (auth-param)]
-    (p (re/input "foo=bar"))
-    ))
+    (p (re/input "Bearer foo=bar,zip=qux,Basic aseifjasefa=,Bearer foo=bar"))))
 
 ;; quoted-string = <quoted-string, see [RFC7230], Section 3.2.6>
 

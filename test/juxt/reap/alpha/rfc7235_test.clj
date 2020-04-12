@@ -29,4 +29,4 @@
         :auth-params [{:name "realm", :value "simple"}]}]
 
       (let [p (rfc7235/www-authenticate)]
-        (p (re/input "Newauth realm=\"apps\", type=1,   title=\"Login to \\\"apps\\\"\", Basic realm=\"simple\"")))))))
+        (p (re/input "Newauth realm=\"apps\", type=1, \t title=\"Login to \\\"apps\\\"\", Basic realm=\"simple\"")))))))
